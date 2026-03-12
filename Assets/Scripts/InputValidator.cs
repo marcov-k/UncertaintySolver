@@ -14,11 +14,7 @@ public class InputValidator : TMP_InputValidator
 
     void OnEnable()
     {
-        if (!string.IsNullOrEmpty(MatchRegex))
-        {
-            regex = new(MatchRegex);
-        }
-        else regex = null;
+        regex = (!string.IsNullOrEmpty(MatchRegex)) ? new Regex(MatchRegex) : null;
     }
 
     public override char Validate(ref string text, ref int pos, char ch)
