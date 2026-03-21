@@ -3,6 +3,7 @@ using TMPro;
 using System;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
+using System.Transactions;
 
 public class Calculator : MonoBehaviour
 {
@@ -13,20 +14,29 @@ public class Calculator : MonoBehaviour
     Regex equationRegex;
     Regex parenMultRegex;
     Regex parenFixRegex;
+    Regex numRegex;
 
     void Start()
     {
+        outputField.text = "Result:";
+
         sigfigRegex = new(@"[1-9]|(?:(?<=(?:[1-9]0*\.[0-9]*)|(?:\.0*[1-9][0-9]*))0)|(?:(?<=[1-9]0*)0(?=0*[1-9\.]))");
-        equationRegex = new(@"^(?<eq>(?<num1>(?<par1>\()?\-?(?(par1).+\)|[0-9.]+))(?<op>[\^\*\/\+\-])(?<num2>(?<par2>\()?\-?(?(par2).+\)|[0-9.]+)))");
+        equationRegex = new(@"^(?<eq>(?<num1>(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))(?<op>[\^\*\/\+\-])(?<num2>(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?)))");
         parenMultRegex = new(@"(?:(?<=[0-9.])\()|(?:(?<=\))[0-9.])");
-        parenFixRegex = new(@"(?:\((?=[0-9.]*\)))|(?:^\((?=.*\)$))|(?:(?<=\([0-9.]*)\))|(?:(?<=^\(.*)\)$)");
+        parenFixRegex = new(@"(?:\((?=[0-9.\[\]]*\)))|(?:^\((?=.*\)$))|(?:(?<=\([0-9.\[\]]*)\))|(?:(?<=^\(.*)\)$)");
+        numRegex = new(@"(?<num>[0-9.]*)(?:\[(?<unc>[0-9.]*)\])?");
 
         string testInput = "((9*5)/(10+5x5))5";
         double testOutput = ((9.0 * 5.0) / (10.0 + (5.0 * 5.0))) * 5.0;
         Debug.Log($"Test input: {testInput}, test result: {Calculate(testInput)}, correct result: {testOutput}");
     }
 
-    public string Calculate(string input)
+    public void UserCalculate()
+    {
+        outputField.text = $"Result: {Calculate(userInput.text)}";
+    }
+
+    string Calculate(string input)
     {
         string fullEq = input.Replace("x", "*");
         fullEq = FixParentheses(fullEq);
@@ -105,18 +115,28 @@ public class Calculator : MonoBehaviour
         input = (input.Contains(")")) ? input.Remove(input.LastIndexOf(")"), 1) : input;
         Match match = equationRegex.Match(input);
 
-        double num1 = double.Parse(match.Groups["num1"].Value);
+        string numString = match.Groups["num1"].Value;
+        Match numMatch = numRegex.Match(numString);
+        Group uncGroup = numMatch.Groups["unc"];
+        double unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
+        Number num1 = new(double.Parse(numMatch.Groups["num"].Value), unc);
+
         string op = match.Groups["op"].Value;
-        double num2 = double.Parse(match.Groups["num2"].Value);
+
+        numString = match.Groups["num2"].Value;
+        numMatch = numRegex.Match(numString);
+        uncGroup = numMatch.Groups["unc"];
+        unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
+        Number num2 = new(double.Parse(numMatch.Groups["num"].Value), unc);
 
         var result = op switch
         {
-            "^" => Math.Pow(num1, num2),
+            "^" => num1 ^ num2,
             "*" => num1 * num2,
             "/" => num1 / num2,
             "+" => num1 + num2,
             "-" => num1 - num2,
-            _ => 0,
+            _ => new Number(0.0),
         };
 
         return result.ToString();
@@ -156,6 +176,11 @@ public class Calculator : MonoBehaviour
         {
             readonly get => Uncertainty / Value;
             set => Uncertainty = value * Value;
+        }
+
+        public override readonly string ToString()
+        {
+            return $"{Value}[{Uncertainty}]";
         }
 
         public static Number operator +(Number a, Number b)
