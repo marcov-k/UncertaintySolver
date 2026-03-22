@@ -21,7 +21,7 @@ public class InputValidator : TMP_InputValidator
     {
         if ((AllowNumbers && char.IsNumber(ch)) || (AllowLetters && char.IsLetter(ch)) || AllowedCharacters.Contains(ch))
         {
-            string newText = text + ch;
+            string newText = text.Insert(pos, ch.ToString());
             if (regex != null && !regex.IsMatch(newText))
             {
                 return '\0';
