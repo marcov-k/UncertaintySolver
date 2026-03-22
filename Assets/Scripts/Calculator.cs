@@ -3,18 +3,24 @@ using TMPro;
 using System;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
-using System.Transactions;
+using UnityEngine.UI;
+using System.Linq;
 
 public class Calculator : MonoBehaviour
 {
     [SerializeField] TMP_InputField userInput;
     [SerializeField] TMP_InputField outputField;
+    [SerializeField] Toggle quadAddToggle;
+    static bool useQuadAdd = false;
     readonly List<string> opOrder = new() { "(", "^", "*", "/", "+", "-" };
-    Regex sigfigRegex;
-    Regex equationRegex;
-    Regex parenMultRegex;
-    Regex parenFixRegex;
-    Regex numRegex;
+    static Regex sigfigRegex;
+    static Regex equationRegex;
+    static Regex parenMultRegex;
+    static Regex parenFixRegex;
+    static Regex numRegex;
+    static Regex decimalRegex;
+    static int minSigfigs, minDecimals = int.MaxValue;
+    static bool onlyAdded = true;
 
     void Start()
     {
@@ -25,10 +31,7 @@ public class Calculator : MonoBehaviour
         parenMultRegex = new(@"(?:(?<=[0-9.])\()|(?:(?<=\))[0-9.])");
         parenFixRegex = new(@"(?:\((?=[0-9.\[\]]*\)))|(?:^\((?=.*\)$))|(?:(?<=\([0-9.\[\]]*)\))|(?:(?<=^\(.*)\)$)");
         numRegex = new(@"(?<num>[0-9.]*)(?:\[(?<unc>[0-9.]*)\])?");
-
-        string testInput = "((9*5)/(10+5x5))5";
-        double testOutput = ((9.0 * 5.0) / (10.0 + (5.0 * 5.0))) * 5.0;
-        Debug.Log($"Test input: {testInput}, test result: {Calculate(testInput)}, correct result: {testOutput}");
+        decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
     }
 
     public void UserCalculate()
@@ -36,8 +39,16 @@ public class Calculator : MonoBehaviour
         outputField.text = $"Result: {Calculate(userInput.text)}";
     }
 
+    public void ToggleQuadAdd()
+    {
+        useQuadAdd = quadAddToggle.isOn;
+    }
+
     string Calculate(string input)
     {
+        (minSigfigs, minDecimals) = (int.MaxValue, int.MaxValue);
+        onlyAdded = true;
+
         string fullEq = input.Replace("x", "*");
         fullEq = FixParentheses(fullEq);
 
@@ -61,7 +72,15 @@ public class Calculator : MonoBehaviour
             fullEq = fullEq.Replace(subEq, eqResult);
         }
 
-        return fullEq;
+        Match numMatch = numRegex.Match(fullEq);
+        Group uncGroup = numMatch.Groups["unc"];
+        double unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
+        Number result = new(double.Parse(numMatch.Groups["num"].Value), uncertainty: unc);
+
+        if (onlyAdded) result.RoundToDecimals(minDecimals);
+        else result.SigFigs = minSigfigs;
+
+        return result.ToScientificString();
     }
 
     int ParseEq(string fullEq, out List<Match> subEqs)
@@ -119,15 +138,30 @@ public class Calculator : MonoBehaviour
         Match numMatch = numRegex.Match(numString);
         Group uncGroup = numMatch.Groups["unc"];
         double unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
-        Number num1 = new(double.Parse(numMatch.Groups["num"].Value), unc);
+        string valueString = numMatch.Groups["num"].Value;
+        Number num1 = new(double.Parse(valueString), uncertainty: unc);
+
+        int sigfigs = SigFigCount(valueString);
+        minSigfigs = sigfigs > 0 ? Math.Min(minSigfigs, sigfigs) : minSigfigs;
+
+        int decimals = DecimalCount(valueString);
+        minDecimals = decimals >= 0 ? Math.Min(minDecimals, decimals) : minDecimals;
 
         string op = match.Groups["op"].Value;
+        if (op != "+" && op != "-") onlyAdded = false;
 
         numString = match.Groups["num2"].Value;
         numMatch = numRegex.Match(numString);
         uncGroup = numMatch.Groups["unc"];
         unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
-        Number num2 = new(double.Parse(numMatch.Groups["num"].Value), unc);
+        valueString = numMatch.Groups["num"].Value;
+        Number num2 = new(double.Parse(valueString), uncertainty: unc);
+
+        sigfigs = SigFigCount(valueString);
+        minSigfigs = sigfigs > 0 ? Math.Min(minSigfigs, sigfigs) : minSigfigs;
+
+        decimals = DecimalCount(valueString);
+        minDecimals = decimals >= 0 ? Math.Min(minDecimals, decimals) : minDecimals;
 
         var result = op switch
         {
@@ -162,15 +196,41 @@ public class Calculator : MonoBehaviour
         return input;
     }
 
-    int SigFigCount(string input)
+    static int SigFigCount(string input)
     {
         var matches = sigfigRegex.Matches(input);
         return matches.Count;
     }
 
+    static int DecimalCount(string input)
+    {
+        var matches = decimalRegex.Matches(input);
+        return matches.Count;
+    }
+
     public struct Number
     {
-        public double Value { get; private set; }
+        public double Value
+        {
+            readonly get => value;
+            set
+            {
+                this.value = value;
+                UpdateScientificNotation();
+            }
+        }
+        double value;
+        public SciNotation ScientificNotation { get; private set; }
+        public int SigFigs
+        {
+            readonly get => sigfigs;
+            set
+            {
+                sigfigs = value;
+                UpdateScientificNotation();
+            }
+        }
+        int sigfigs;
         public double Uncertainty { get; private set; }
         public double RelativeUncertainty
         {
@@ -180,27 +240,27 @@ public class Calculator : MonoBehaviour
 
         public override readonly string ToString()
         {
-            return $"{Value}[{Uncertainty}]";
+            return $"{Value:R}[{Uncertainty}]";
         }
 
         public static Number operator +(Number a, Number b)
         {
             double value = a.Value + b.Value;
-            double uncertainty = MathUtils.QuadratureAdd(a.Uncertainty, b.Uncertainty);
-            return new(value, uncertainty);
+            double uncertainty = AddUncertainty(a.Uncertainty, b.Uncertainty);
+            return new(value, uncertainty: uncertainty);
         }
 
         public static Number operator -(Number a, Number b)
         {
             double value = a.Value - b.Value;
-            double uncertainty = MathUtils.QuadratureAdd(a.Uncertainty, b.Uncertainty);
-            return new(value, uncertainty);
+            double uncertainty = AddUncertainty(a.Uncertainty, b.Uncertainty);
+            return new(value, uncertainty: uncertainty);
         }
 
         public static Number operator *(Number a, Number b)
         {
             double value = a.Value * b.Value;
-            double uncertainty = MathUtils.QuadratureAdd(a.RelativeUncertainty, b.RelativeUncertainty);
+            double uncertainty = AddUncertainty(a.RelativeUncertainty, b.RelativeUncertainty);
             Number result = new(value)
             {
                 RelativeUncertainty = uncertainty
@@ -211,7 +271,7 @@ public class Calculator : MonoBehaviour
         public static Number operator /(Number a, Number b)
         {
             double value = a.Value / b.Value;
-            double uncertainty = MathUtils.QuadratureAdd(a.RelativeUncertainty, b.RelativeUncertainty);
+            double uncertainty = AddUncertainty(a.RelativeUncertainty, b.RelativeUncertainty);
             Number result = new(value)
             {
                 RelativeUncertainty = uncertainty
@@ -230,10 +290,140 @@ public class Calculator : MonoBehaviour
             return result;
         }
 
-        public Number(double value, double uncertainty = 0)
+        static double AddUncertainty(double a, double b)
+        {
+            return useQuadAdd ? MathUtils.QuadratureAdd(a, b) : a + b;
+        }
+
+        public Number(double value, int? sigfigs = null, double uncertainty = 0)
+        {
+            this.value = value;
+            this.sigfigs = sigfigs ?? SigFigCount(value.ToString());
+            Uncertainty = uncertainty;
+            ScientificNotation = new(string.Empty);
+            UpdateScientificNotation();
+        }
+
+        public readonly string ToScientificString()
+        {
+            return $"{ScientificNotation}[{Uncertainty}]";
+        }
+
+        public void RoundToDecimals(int decimals)
+        {
+            Value = Math.Round(Value, decimals);
+        }
+
+        void UpdateScientificNotation()
+        {
+            double absValue = Math.Abs(Value);
+
+            int exponent = 0;
+            while (absValue >= 10.0)
+            {
+                absValue /= 10.0;
+                exponent++;
+            }
+
+            while (absValue < 1.0)
+            {
+                absValue *= 10.0;
+                exponent--;
+            }
+
+            string value = RoundToSigFigs(Value >= 0 ? absValue : -absValue, SigFigs);
+
+            ScientificNotation = new(value, exponent);
+        }
+
+        readonly string RoundToSigFigs(double value, int sigfigs)
+        {
+            string valueStr = value.ToString();
+            int sigfigCount = SigFigCount(valueStr);
+
+            while (sigfigCount != sigfigs)
+            {
+                if (sigfigCount <= 0 || sigfigs <= 0) return valueStr;
+
+                if (sigfigCount < sigfigs) valueStr = AddSigFig(valueStr);
+                else valueStr = RemoveSigFig(valueStr);
+
+                sigfigCount = SigFigCount(valueStr);
+            }
+
+            return valueStr;
+        }
+
+        readonly string AddSigFig(string value)
+        {
+            if (!value.Contains(".")) value += ".";
+            value += "0";
+            return value;
+        }
+
+        readonly string RemoveSigFig(string value)
+        {
+            var charas = value.ToCharArray().ToList();
+
+            bool? roundUp = null;
+            bool keepRounding = true;
+            for (int i = charas.Count - 1; i >= 0; i--)
+            {
+                if (roundUp == null)
+                {
+                    if (char.IsDigit(charas[i]))
+                    {
+                        if (int.Parse(charas[i].ToString()) >= 5) roundUp = true;
+                        else roundUp = false;
+                        charas.RemoveAt(i);
+                    }
+                }
+                else
+                {
+                    if (char.IsDigit(charas[i]))
+                    {
+                        if (roundUp == true)
+                        {
+                            int digit = int.Parse(charas[i].ToString());
+                            digit++;
+                            if (digit > 9) digit = 0;
+                            else keepRounding = false;
+
+                            charas[i] = digit.ToString()[0];
+                        }
+                        else keepRounding = false;
+                    }
+                }
+
+                if (!keepRounding) break;
+            }
+
+            if (charas[^1] == '.') charas.RemoveAt(charas.Count - 1);
+
+            string output = string.Empty;
+            foreach (var c in charas)
+            {
+                output += c;
+            }
+
+            return output;
+        }
+    }
+
+    public struct SciNotation
+    {
+        public string Value { get; set; }
+        public int Exponent { get; set; }
+
+        public SciNotation(string value, int exponent = 0)
         {
             Value = value;
-            Uncertainty = uncertainty;
+            Exponent = exponent;
+        }
+
+        public override readonly string ToString()
+        {
+            return $"{Value}*10^{Exponent}";
         }
     }
 
@@ -243,7 +433,7 @@ public class Calculator : MonoBehaviour
         {
             double uncertA = b.Value * a.RelativeUncertainty;
             double uncertB = Math.Log(a.Value) * b.Uncertainty;
-            return QuadratureAdd(uncertA, uncertB);
+            return useQuadAdd ? QuadratureAdd(uncertA, uncertB) : uncertA + uncertB;
         }
 
         public static double QuadratureAdd(double a, double b)
