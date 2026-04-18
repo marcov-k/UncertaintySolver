@@ -23,9 +23,10 @@ public class Calculator : MonoBehaviour
         { "-", OperationType.Subtract }
     };
     static Regex sigfigRegex;
-    static Regex equationRegex;
     static Regex nodeRegex;
+    static Regex logRegex;
     static Regex parenMultRegex;
+    static Regex logMultRegex;
     static Regex parenFixRegex;
     static Regex numRegex;
     static Regex decimalRegex;
@@ -37,15 +38,21 @@ public class Calculator : MonoBehaviour
         outputField.text = "Result:";
 
         sigfigRegex = new(@"[1-9]|(?:(?<=(?:[1-9]0*\.[0-9]*)|(?:\.0*[1-9][0-9]*))0)|(?:(?<=[1-9]0*)0(?=0*[1-9\.]))");
-        equationRegex = new(@"^(?<eq>(?<num1>(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))(?<op>[\^\*\/\+\-])(?<num2>(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?)))");
         nodeRegex = new(@"^(?<eq>(?<num1>(?:(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\)))(?<op>[\^\*\/\+\-])(?<num2>(?:(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\))))");
+        logRegex = new(@"^(?<op>ln|log)(?<arg>.+\))$");
         parenMultRegex = new(@"(?:(?<=[0-9.])\()|(?:(?<=\))[0-9.])");
-        parenFixRegex = new(@"(?:\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)");
+        logMultRegex = new(@"(?:(?<=[0-9.])l)");
+        parenFixRegex = new(@"(?:(?<!ln|log)\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=(?<!ln|log)\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)");
         numRegex = new(@"^(?<num>[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
         decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
 
-        string testInput = "(5-15)x(5+10)";
-        double answer = (5 - 15) * (5 + 10);
+        // Test();
+    }
+
+    void Test()
+    {
+        string testInput = "5ln(5)";
+        double answer = 5 * Math.Log(5);
         string result = Calculate(testInput);
         Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
@@ -89,9 +96,19 @@ public class Calculator : MonoBehaviour
         {
             var multParens = parenMultRegex.Matches(input);
 
-            foreach (Match multParen in multParens)
+            for (int i = 0; i < multParens.Count; i++)
             {
-                input = input.Insert(multParen.Index, "*");
+                input = input.Insert(multParens[i].Index + i, "*");
+            }
+        }
+
+        if (logMultRegex.IsMatch(input))
+        {
+            var multLogs = logMultRegex.Matches(input);
+
+            for (int i = 0; i < multLogs.Count; i++)
+            {
+                input = input.Insert(multLogs[i].Index + i, "*");
             }
         }
 
@@ -150,31 +167,49 @@ public class Calculator : MonoBehaviour
             var (a, op, b) = FindTopOp(formula);
             Operator = opTypes[op];
 
+            (a, b) = (FixParentheses(a), FixParentheses(b));
             Children = new Node[2] { numRegex.IsMatch(a) ? new Number(a) : new Operation(a), numRegex.IsMatch(b) ? new Number(b) : new Operation(b) };
         }
 
         static (string a, string op, string b) FindTopOp(string equation)
         {
-            string subEquation = equation;
-
-            List<IndexedOp> operations = new();
-            int charsRemoved = 0;
-            while (nodeRegex.IsMatch(subEquation))
+            if (logRegex.IsMatch(equation))
             {
-                var match = nodeRegex.Match(subEquation);
-
-                string num1 = match.Groups["num1"].Value;
+                var match = logRegex.Match(equation);
                 string op = match.Groups["op"].Value;
 
-                operations.Add(new(opTypes[op], match.Groups["op"].Index + charsRemoved, op.Length));
+                string a = op switch
+                {
+                    "ln" => Math.E.ToString(),
+                    "log" => "10",
+                    _ => ""
+                };
 
-                charsRemoved += num1.Length + op.Length;
-                subEquation = subEquation.Remove(match.Index, num1.Length + op.Length);
+                return (a, op, match.Groups["arg"].Value);
             }
+            else
+            {
+                string subEquation = equation;
 
-            var (topIndex, opLength) = FindTopIndex(operations);
+                List<IndexedOp> operations = new();
+                int charsRemoved = 0;
+                while (nodeRegex.IsMatch(subEquation))
+                {
+                    var match = nodeRegex.Match(subEquation);
 
-            return (equation.Substring(0, topIndex), equation.Substring(topIndex, opLength), equation.Substring(topIndex + opLength, equation.Length - topIndex - opLength));
+                    string num1 = match.Groups["num1"].Value;
+                    string op = match.Groups["op"].Value;
+
+                    operations.Add(new(opTypes[op], match.Groups["op"].Index + charsRemoved, op.Length));
+
+                    charsRemoved += num1.Length + op.Length;
+                    subEquation = subEquation.Remove(match.Index, num1.Length + op.Length);
+                }
+
+                var (topIndex, opLength) = FindTopIndex(operations);
+
+                return (equation.Substring(0, topIndex), equation.Substring(topIndex, opLength), equation.Substring(topIndex + opLength, equation.Length - topIndex - opLength));
+            }
         }
 
         static (int topIndex, int opLength) FindTopIndex(List<IndexedOp> operations)
