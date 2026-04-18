@@ -12,9 +12,19 @@ public class Calculator : MonoBehaviour
     [SerializeField] TMP_InputField outputField;
     [SerializeField] Toggle quadAddToggle;
     static bool useQuadAdd = false;
-    readonly List<string> opOrder = new() { "(", "^", "*", "/", "+", "-" };
+    static readonly Dictionary<string, OperationType> opTypes = new()
+    {
+        { "^", OperationType.Exponent },
+        { "log", OperationType.Log },
+        { "ln", OperationType.Log },
+        { "*", OperationType.Multiply },
+        { "/", OperationType.Divide },
+        { "+", OperationType.Add },
+        { "-", OperationType.Subtract }
+    };
     static Regex sigfigRegex;
     static Regex equationRegex;
+    static Regex nodeRegex;
     static Regex parenMultRegex;
     static Regex parenFixRegex;
     static Regex numRegex;
@@ -28,10 +38,16 @@ public class Calculator : MonoBehaviour
 
         sigfigRegex = new(@"[1-9]|(?:(?<=(?:[1-9]0*\.[0-9]*)|(?:\.0*[1-9][0-9]*))0)|(?:(?<=[1-9]0*)0(?=0*[1-9\.]))");
         equationRegex = new(@"^(?<eq>(?<num1>(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))(?<op>[\^\*\/\+\-])(?<num2>(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?)))");
+        nodeRegex = new(@"^(?<eq>(?<num1>(?:(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\)))(?<op>[\^\*\/\+\-])(?<num2>(?:(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\))))");
         parenMultRegex = new(@"(?:(?<=[0-9.])\()|(?:(?<=\))[0-9.])");
-        parenFixRegex = new(@"(?:\((?=[0-9.\[\]]*\)))|(?:^\((?=.*\)$))|(?:(?<=\([0-9.\[\]]*)\))|(?:(?<=^\(.*)\)$)");
-        numRegex = new(@"(?<num>[0-9.]*)(?:\[(?<unc>[0-9.]*)\])?");
+        parenFixRegex = new(@"(?:\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)");
+        numRegex = new(@"^(?<num>[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
         decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
+
+        string testInput = "(5-15)x(5+10)";
+        double answer = (5 - 15) * (5 + 10);
+        string result = Calculate(testInput);
+        Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
 
     public void UserCalculate()
@@ -52,131 +68,22 @@ public class Calculator : MonoBehaviour
         string fullEq = input.Replace("x", "*");
         fullEq = FixParentheses(fullEq);
 
-        string subEq;
-        string eqResult;
-        bool continueParse;
-        while (equationRegex.IsMatch(fullEq))
+        Number result;
+
+        if (numRegex.IsMatch(fullEq)) result = new(fullEq);
+        else
         {
-            fullEq = FixParentheses(fullEq);
-            subEq = fullEq;
-            continueParse = true;
-            while(ParseEq(subEq, out var subEqs) > 1 || continueParse)
-            {
-                subEq = FindNextEq(subEqs);
-                subEq = FixParentheses(subEq);
+            Operation treeStart = new(fullEq);
+            result = treeStart.Solve();
 
-                continueParse = subEq.Contains("(");
-            }
-
-            eqResult = SolveEq(subEq);
-            fullEq = fullEq.Replace(subEq, eqResult);
+            if (onlyAdded) result.RoundToDecimals(minDecimals);
+            else result.SigFigs = minSigfigs;
         }
-
-        Match numMatch = numRegex.Match(fullEq);
-        Group uncGroup = numMatch.Groups["unc"];
-        double unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
-        Number result = new(double.Parse(numMatch.Groups["num"].Value), uncertainty: unc);
-
-        if (onlyAdded) result.RoundToDecimals(minDecimals);
-        else result.SigFigs = minSigfigs;
 
         return result.ToScientificString();
     }
 
-    int ParseEq(string fullEq, out List<Match> subEqs)
-    {
-        subEqs = new();
-
-        Match match;
-        while(equationRegex.IsMatch(fullEq))
-        {
-            match = equationRegex.Match(fullEq);
-            fullEq = fullEq.Remove(match.Index, match.Groups["num1"].Length + match.Groups["op"].Length);
-            subEqs.Add(match);
-        }
-
-        return subEqs.Count;
-    }
-
-    string FindNextEq(List<Match> input)
-    {
-        foreach (var op in opOrder)
-        {
-            foreach (var eq in input)
-            {
-                if (op == "(")
-                {
-                    if (eq.Groups["num1"].Value.Contains(op))
-                    {
-                        return eq.Groups["num1"].Value;
-                    }
-                    else if (eq.Groups["num2"].Value.Contains(op))
-                    {
-                        return eq.Groups["num2"].Value;
-                    }
-                }
-                else
-                {
-                    if (eq.Value.Contains(op))
-                    {
-                        return eq.Value;
-                    }
-                }
-            }
-        }
-
-        return string.Empty;
-    }
-
-    string SolveEq(string input)
-    {
-        input = (input.Contains("(")) ? input.Remove(input.IndexOf("("), 1) : input;
-        input = (input.Contains(")")) ? input.Remove(input.LastIndexOf(")"), 1) : input;
-        Match match = equationRegex.Match(input);
-
-        string numString = match.Groups["num1"].Value;
-        Match numMatch = numRegex.Match(numString);
-        Group uncGroup = numMatch.Groups["unc"];
-        double unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
-        string valueString = numMatch.Groups["num"].Value;
-        Number num1 = new(double.Parse(valueString), uncertainty: unc);
-
-        int sigfigs = SigFigCount(valueString);
-        minSigfigs = sigfigs > 0 ? Math.Min(minSigfigs, sigfigs) : minSigfigs;
-
-        int decimals = DecimalCount(valueString);
-        minDecimals = decimals >= 0 ? Math.Min(minDecimals, decimals) : minDecimals;
-
-        string op = match.Groups["op"].Value;
-        if (op != "+" && op != "-") onlyAdded = false;
-
-        numString = match.Groups["num2"].Value;
-        numMatch = numRegex.Match(numString);
-        uncGroup = numMatch.Groups["unc"];
-        unc = (string.IsNullOrEmpty(uncGroup.Value)) ? 0.0 : double.Parse(uncGroup.Value);
-        valueString = numMatch.Groups["num"].Value;
-        Number num2 = new(double.Parse(valueString), uncertainty: unc);
-
-        sigfigs = SigFigCount(valueString);
-        minSigfigs = sigfigs > 0 ? Math.Min(minSigfigs, sigfigs) : minSigfigs;
-
-        decimals = DecimalCount(valueString);
-        minDecimals = decimals >= 0 ? Math.Min(minDecimals, decimals) : minDecimals;
-
-        var result = op switch
-        {
-            "^" => num1 ^ num2,
-            "*" => num1 * num2,
-            "/" => num1 / num2,
-            "+" => num1 + num2,
-            "-" => num1 - num2,
-            _ => new Number(0.0),
-        };
-
-        return result.ToString();
-    }
-
-    string FixParentheses(string input)
+    static string FixParentheses(string input)
     {
         if (parenMultRegex.IsMatch(input))
         {
@@ -208,11 +115,107 @@ public class Calculator : MonoBehaviour
         return matches.Count;
     }
 
-    public struct Number
+    public abstract class Node
+    {
+        public Node[] Children { get; protected set; }
+
+        public virtual Number Solve() => throw new NotImplementedException();
+
+        public Node(string formula) { }
+    }
+
+    public class Operation : Node
+    {
+        OperationType Operator { get; set; }
+
+        public override Number Solve()
+        {
+            var inputs = new Number[2] { Children[0].Solve(), Children[1].Solve() };
+
+            return Operator switch
+            {
+                OperationType.Exponent => inputs[0] ^ inputs[1],
+                OperationType.Log => Number.Log(inputs[0], inputs[1]),
+                OperationType.Multiply => inputs[0] * inputs[1],
+                OperationType.Divide => inputs[0] / inputs[1],
+                OperationType.Add => inputs[0] + inputs[1],
+                OperationType.Subtract => inputs[0] - inputs[1],
+                _ => null
+            };
+        }
+
+        public Operation(string formula) : base(formula)
+        {
+            formula = FixParentheses(formula);
+            var (a, op, b) = FindTopOp(formula);
+            Operator = opTypes[op];
+
+            Children = new Node[2] { numRegex.IsMatch(a) ? new Number(a) : new Operation(a), numRegex.IsMatch(b) ? new Number(b) : new Operation(b) };
+        }
+
+        static (string a, string op, string b) FindTopOp(string equation)
+        {
+            string subEquation = equation;
+
+            List<IndexedOp> operations = new();
+            int charsRemoved = 0;
+            while (nodeRegex.IsMatch(subEquation))
+            {
+                var match = nodeRegex.Match(subEquation);
+
+                string num1 = match.Groups["num1"].Value;
+                string op = match.Groups["op"].Value;
+
+                operations.Add(new(opTypes[op], match.Groups["op"].Index + charsRemoved, op.Length));
+
+                charsRemoved += num1.Length + op.Length;
+                subEquation = subEquation.Remove(match.Index, num1.Length + op.Length);
+            }
+
+            var (topIndex, opLength) = FindTopIndex(operations);
+
+            return (equation.Substring(0, topIndex), equation.Substring(topIndex, opLength), equation.Substring(topIndex + opLength, equation.Length - topIndex - opLength));
+        }
+
+        static (int topIndex, int opLength) FindTopIndex(List<IndexedOp> operations)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                List<OperationType> opChecks = new();
+
+                switch (i)
+                {
+                    case 0:
+                        opChecks.AddRange(new List<OperationType>() { opTypes["+"], opTypes["-"] });
+                        break;
+                    case 1:
+                        opChecks.AddRange(new List<OperationType>() { opTypes["*"], opTypes["/"] });
+                        break;
+                    case 2:
+                        opChecks.Add(opTypes["^"]);
+                        break;
+                }
+
+                foreach (var op in operations)
+                {
+                    if (opChecks.Contains(op.Op))
+                    {
+                        return (op.Index, op.OpLength);
+                    }
+                }
+            }
+
+            return (0, 0);
+        }
+
+        record IndexedOp(OperationType Op, int Index, int OpLength);
+    }
+
+    public class Number : Node
     {
         public double Value
         {
-            readonly get => value;
+            get => value;
             set
             {
                 this.value = value;
@@ -223,7 +226,7 @@ public class Calculator : MonoBehaviour
         public SciNotation ScientificNotation { get; private set; }
         public int SigFigs
         {
-            readonly get => sigfigs;
+            get => sigfigs;
             set
             {
                 sigfigs = value;
@@ -231,20 +234,23 @@ public class Calculator : MonoBehaviour
             }
         }
         int sigfigs;
+        public int Decimals;
         public double Uncertainty { get; private set; }
         public double RelativeUncertainty
         {
-            readonly get => Uncertainty / Value;
+            get => Uncertainty / Value;
             set => Uncertainty = value * Value;
         }
 
-        public override readonly string ToString()
+        public override string ToString()
         {
             return $"{Value:R}[{Uncertainty}]";
         }
 
         public static Number operator +(Number a, Number b)
         {
+            minSigfigs = Math.Min(minSigfigs, Math.Min(a.SigFigs, b.SigFigs));
+            minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value + b.Value;
             double uncertainty = AddUncertainty(a.Uncertainty, b.Uncertainty);
             return new(value, uncertainty: uncertainty);
@@ -252,6 +258,8 @@ public class Calculator : MonoBehaviour
 
         public static Number operator -(Number a, Number b)
         {
+            minSigfigs = Math.Min(minSigfigs, Math.Min(a.SigFigs, b.SigFigs));
+            minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value - b.Value;
             double uncertainty = AddUncertainty(a.Uncertainty, b.Uncertainty);
             return new(value, uncertainty: uncertainty);
@@ -259,6 +267,9 @@ public class Calculator : MonoBehaviour
 
         public static Number operator *(Number a, Number b)
         {
+            onlyAdded = false;
+            minSigfigs = Math.Min(minSigfigs, Math.Min(a.SigFigs, b.SigFigs));
+            minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value * b.Value;
             double uncertainty = AddUncertainty(a.RelativeUncertainty, b.RelativeUncertainty);
             Number result = new(value)
@@ -270,6 +281,9 @@ public class Calculator : MonoBehaviour
 
         public static Number operator /(Number a, Number b)
         {
+            onlyAdded = false;
+            minSigfigs = Math.Min(minSigfigs, Math.Min(a.SigFigs, b.SigFigs));
+            minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value / b.Value;
             double uncertainty = AddUncertainty(a.RelativeUncertainty, b.RelativeUncertainty);
             Number result = new(value)
@@ -281,6 +295,9 @@ public class Calculator : MonoBehaviour
 
         public static Number operator ^(Number a, Number b)
         {
+            onlyAdded = false;
+            minSigfigs = Math.Min(minSigfigs, a.SigFigs);
+            minDecimals = Math.Min(minDecimals, a.Decimals);
             double value = Math.Pow(a.Value, b.Value);
             double uncertainty = MathUtils.ExponentUncertainty(a, b);
             Number result = new(value)
@@ -290,12 +307,38 @@ public class Calculator : MonoBehaviour
             return result;
         }
 
+        public static Number Log(Number baseNum, Number arg)
+        {
+            onlyAdded = false;
+            minSigfigs = Math.Min(minSigfigs, arg.SigFigs);
+            minDecimals = Math.Min(minDecimals, arg.Decimals);
+            double value = Math.Log(arg.Value, baseNum.value);
+            double uncertainty = MathUtils.LogUncertainty(baseNum.Value, arg);
+            return new(value, uncertainty: uncertainty);
+        }
+
         static double AddUncertainty(double a, double b)
         {
             return useQuadAdd ? MathUtils.QuadratureAdd(a, b) : a + b;
         }
 
-        public Number(double value, int? sigfigs = null, double uncertainty = 0)
+        public override Number Solve() => this;
+
+        public Number(string formula) : base(formula)
+        {
+            formula = FixParentheses(formula);
+            Match numMatch = numRegex.Match(formula);
+            Group uncGroup = numMatch.Groups["unc"];
+            Uncertainty = string.IsNullOrEmpty(uncGroup.Value) ? 0.0 : double.Parse(uncGroup.Value);
+            string valueString = numMatch.Groups["num"].Value;
+            value = double.Parse(valueString);
+            sigfigs = SigFigCount(valueString);
+            Decimals = DecimalCount(valueString);
+            ScientificNotation = new(string.Empty);
+            UpdateScientificNotation();
+        }
+
+        public Number(double value, int? sigfigs = null, double uncertainty = 0) : base("")
         {
             this.value = value;
             this.sigfigs = sigfigs ?? SigFigCount(value.ToString());
@@ -304,7 +347,7 @@ public class Calculator : MonoBehaviour
             UpdateScientificNotation();
         }
 
-        public readonly string ToScientificString()
+        public string ToScientificString()
         {
             return $"{ScientificNotation}[{Uncertainty}]";
         }
@@ -336,7 +379,7 @@ public class Calculator : MonoBehaviour
             ScientificNotation = new(value, exponent);
         }
 
-        readonly string RoundToSigFigs(double value, int sigfigs)
+        string RoundToSigFigs(double value, int sigfigs)
         {
             string valueStr = value.ToString();
             int sigfigCount = SigFigCount(valueStr);
@@ -354,14 +397,14 @@ public class Calculator : MonoBehaviour
             return valueStr;
         }
 
-        readonly string AddSigFig(string value)
+        string AddSigFig(string value)
         {
             if (!value.Contains(".")) value += ".";
             value += "0";
             return value;
         }
 
-        readonly string RemoveSigFig(string value)
+        string RemoveSigFig(string value)
         {
             var charas = value.ToCharArray().ToList();
 
@@ -436,9 +479,24 @@ public class Calculator : MonoBehaviour
             return useQuadAdd ? QuadratureAdd(uncertA, uncertB) : uncertA + uncertB;
         }
 
+        public static double LogUncertainty(double baseNum, Number arg)
+        {
+            return arg.RelativeUncertainty / Math.Log(baseNum);
+        }
+
         public static double QuadratureAdd(double a, double b)
         {
             return Math.Sqrt(Math.Pow(a, 2) + Math.Pow(b, 2));
         }
+    }
+
+    public enum OperationType
+    {
+        Add,
+        Subtract,
+        Multiply,
+        Divide,
+        Exponent,
+        Log
     }
 }
