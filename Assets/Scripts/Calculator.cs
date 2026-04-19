@@ -390,6 +390,7 @@ public class Calculator : MonoBehaviour
         public void RoundToDecimals(int decimals)
         {
             Value = Math.Round(Value, decimals);
+            SigFigs = (int)Math.Floor(Math.Abs(Value) / 10.0) + decimals;
         }
 
         void UpdateScientificNotation()
