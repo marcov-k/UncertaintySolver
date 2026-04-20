@@ -43,16 +43,16 @@ public class Calculator : MonoBehaviour
         parenMultRegex = new(@"(?:(?<=[0-9.])\()|(?:(?<=\))[0-9.])");
         logMultRegex = new(@"(?:(?<=[0-9.])l)");
         parenFixRegex = new(@"(?:(?<!ln|log)\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=(?<!ln|log)\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)");
-        numRegex = new(@"^(?<num>[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
+        numRegex = new(@"^(?<num>-?[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
         decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
 
-        // Test();
+        Test();
     }
 
     void Test()
     {
-        string testInput = "5ln(5)";
-        double answer = 5 * Math.Log(5);
+        string testInput = "-10+5";
+        double answer = -10 + 5;
         string result = Calculate(testInput);
         Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
