@@ -19,9 +19,6 @@ Log Multiplication Fixing:
 Log Negative Fixing:
 (?:(?<=^-)l)
 
-Redundant Parentheses Fixing:
-(?:(?<!ln|log)\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=(?<!ln|log)\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)
-
 Number Matching/Parsing:
 ^(?<num>-?[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$
 

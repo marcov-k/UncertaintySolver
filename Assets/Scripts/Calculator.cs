@@ -28,7 +28,6 @@ public class Calculator : MonoBehaviour
     static Regex parenMultRegex;
     static Regex logMultRegex;
     static Regex logNegRegex;
-    static Regex parenFixRegex;
     static Regex numRegex;
     static Regex decimalRegex;
     static int minSigfigs, minDecimals = int.MaxValue;
@@ -44,7 +43,6 @@ public class Calculator : MonoBehaviour
         parenMultRegex = new(@"(?:(?<=[0-9.\)\]])\()|(?:(?<=\))[0-9.])");
         logMultRegex = new(@"(?:(?<=[0-9.\)\]])l)");
         logNegRegex = new(@"(?:(?<=^-)l)");
-        parenFixRegex = new(@"(?:(?<!ln|log)\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=(?<!ln|log)\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)");
         numRegex = new(@"^(?<num>-?[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
         decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
 
@@ -53,8 +51,8 @@ public class Calculator : MonoBehaviour
 
     void Test()
     {
-        string testInput = "5-ln(5)";
-        double answer = 5 - Math.Log(5);
+        string testInput = "((5)(5))";
+        double answer = 5 * 5;
         string result = Calculate(testInput);
         Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
@@ -120,9 +118,34 @@ public class Calculator : MonoBehaviour
             }
         }
 
-        if (parenFixRegex.IsMatch(input))
+        // Remove any redundant parentheses wrapping entire equation
+        bool outerRedundant = true;
+        while (input[0] == '(' && input[^1] == ')' && outerRedundant)
         {
-            input = parenFixRegex.Replace(input, string.Empty);
+            int openCount = 0;
+            for (int i = 1; i < input.Length; i++)
+            {
+                switch (input[i])
+                {
+                    case '(':
+                        openCount++;
+                        break;
+                    case ')':
+                        openCount--;
+                        break;
+                }
+
+                if (openCount < 0 && i < input.Length - 1)
+                {
+                    outerRedundant = false;
+                    break;
+                }
+            }
+
+            if (outerRedundant)
+            {
+                input = input[..^1][1..];
+            }
         }
 
         return input;
