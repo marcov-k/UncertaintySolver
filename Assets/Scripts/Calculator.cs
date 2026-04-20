@@ -27,6 +27,7 @@ public class Calculator : MonoBehaviour
     static Regex logRegex;
     static Regex parenMultRegex;
     static Regex logMultRegex;
+    static Regex logNegRegex;
     static Regex parenFixRegex;
     static Regex numRegex;
     static Regex decimalRegex;
@@ -40,8 +41,9 @@ public class Calculator : MonoBehaviour
         sigfigRegex = new(@"[1-9]|(?:(?<=(?:[1-9]0*\.[0-9]*)|(?:\.0*[1-9][0-9]*))0)|(?:(?<=[1-9]0*)0(?=0*[1-9\.]))");
         nodeRegex = new(@"^(?<eq>(?<num1>(?:(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\)))(?<op>[\^\*\/\+\-])(?<num2>(?:(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\))))");
         logRegex = new(@"^(?<op>ln|log)(?<arg>.+\))$");
-        parenMultRegex = new(@"(?:(?<=[0-9.])\()|(?:(?<=\))[0-9.])");
-        logMultRegex = new(@"(?:(?<=[0-9.])l)");
+        parenMultRegex = new(@"(?:(?<=[0-9.\)\]])\()|(?:(?<=\))[0-9.])");
+        logMultRegex = new(@"(?:(?<=[0-9.\)\]])l)");
+        logNegRegex = new(@"(?:(?<=^-)l)");
         parenFixRegex = new(@"(?:(?<!ln|log)\((?=[0-9.\[\]]*(?:(?<!\).*)\))))|(?:^\((?=.*(?:(?<!\).*)\))$))|(?:(?<=(?<!ln|log)\([0-9.\[\]]*)(?<!\).*)\))|(?:(?<=^\(.*)(?<!\).*)\)$)");
         numRegex = new(@"^(?<num>-?[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
         decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
@@ -51,8 +53,8 @@ public class Calculator : MonoBehaviour
 
     void Test()
     {
-        string testInput = "-10+5";
-        double answer = -10 + 5;
+        string testInput = "5-ln(5)";
+        double answer = 5 - Math.Log(5);
         string result = Calculate(testInput);
         Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
@@ -100,6 +102,12 @@ public class Calculator : MonoBehaviour
             {
                 input = input.Insert(multParens[i].Index + i, "*");
             }
+        }
+
+        if (logNegRegex.IsMatch(input))
+        {
+            var negLog = logNegRegex.Match(input);
+            input = input.Insert(negLog.Index, "1");
         }
 
         if (logMultRegex.IsMatch(input))
