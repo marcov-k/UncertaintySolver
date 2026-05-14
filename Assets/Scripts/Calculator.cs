@@ -26,6 +26,7 @@ public class Calculator : MonoBehaviour
     static Regex nodeRegex;
     static Regex logRegex;
     static Regex parenMultRegex;
+    static Regex parenNegRegex;
     static Regex logMultRegex;
     static Regex logNegRegex;
     static Regex numRegex;
@@ -41,18 +42,19 @@ public class Calculator : MonoBehaviour
         nodeRegex = new(@"^(?<eq>(?<num1>(?:(?<par1>\()?\-?(?(par1).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\)))(?<op>[\^\*\/\+\-])(?<num2>(?:(?<par2>\()?\-?(?(par2).+\)|[0-9.]+(?:\[[0-9.]*\])?))|(?:(?:ln|log)\(.+\))))");
         logRegex = new(@"^(?<op>ln|log)(?<arg>.+\))$");
         parenMultRegex = new(@"(?:(?<=[0-9.\)\]])\()|(?:(?<=\))[0-9.])");
+        parenNegRegex = new(@"(?:(?<=(?<![0-9\)\]])-)\()");
         logMultRegex = new(@"(?:(?<=[0-9.\)\]])l)");
         logNegRegex = new(@"(?:(?<=^-)l)");
         numRegex = new(@"^(?<num>-?[0-9.]+)(?:\[(?<unc>[0-9.]*)\])?$");
         decimalRegex = new(@"(?<=\.[0-9]*)[0-9]");
 
-        Test();
+        // Test();
     }
 
     void Test()
     {
-        string testInput = "((5)(5))";
-        double answer = 5 * 5;
+        string testInput = "(1.000/2.000)*(10.00^(-(14.00-12.24[0.01])))";
+        double answer = (1 / 2) * Math.Pow(10, -(14 - 12.24));
         string result = Calculate(testInput);
         Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
@@ -92,6 +94,17 @@ public class Calculator : MonoBehaviour
 
     static string FixParentheses(string input)
     {
+        string maxSigfigInsert = 1.0.ToString("F17");
+        if (parenNegRegex.IsMatch(input))
+        {
+            var negParens = parenNegRegex.Matches(input);
+
+            for (int i = 0; i < negParens.Count; i++)
+            {
+                input = input.Insert(negParens[i].Index + i, maxSigfigInsert);
+            }
+        }
+
         if (parenMultRegex.IsMatch(input))
         {
             var multParens = parenMultRegex.Matches(input);
@@ -104,8 +117,12 @@ public class Calculator : MonoBehaviour
 
         if (logNegRegex.IsMatch(input))
         {
-            var negLog = logNegRegex.Match(input);
-            input = input.Insert(negLog.Index, "1");
+            var negLogs = logNegRegex.Matches(input);
+
+            for (int i = 0; i < negLogs.Count; i++)
+            {
+                input = input.Insert(negLogs[i].Index + i, maxSigfigInsert);
+            }
         }
 
         if (logMultRegex.IsMatch(input))
@@ -170,6 +187,8 @@ public class Calculator : MonoBehaviour
         public virtual Number Solve() => throw new NotImplementedException();
 
         public Node(string formula) { }
+
+        public Node() { }
     }
 
     public class Operation : Node
@@ -296,7 +315,7 @@ public class Calculator : MonoBehaviour
             set
             {
                 sigfigs = value;
-                UpdateScientificNotation();
+                if (sigfigs != int.MaxValue) UpdateScientificNotation();
             }
         }
         int sigfigs;
@@ -319,7 +338,7 @@ public class Calculator : MonoBehaviour
             minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value + b.Value;
             double uncertainty = AddUncertainty(a.Uncertainty, b.Uncertainty);
-            return new(value, uncertainty: uncertainty);
+            return new(value, sigfigs: int.MaxValue, decimals: int.MaxValue, uncertainty: uncertainty);
         }
 
         public static Number operator -(Number a, Number b)
@@ -328,7 +347,7 @@ public class Calculator : MonoBehaviour
             minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value - b.Value;
             double uncertainty = AddUncertainty(a.Uncertainty, b.Uncertainty);
-            return new(value, uncertainty: uncertainty);
+            return new(value, sigfigs: int.MaxValue, decimals: int.MaxValue, uncertainty: uncertainty);
         }
 
         public static Number operator *(Number a, Number b)
@@ -338,7 +357,7 @@ public class Calculator : MonoBehaviour
             minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value * b.Value;
             double uncertainty = AddUncertainty(a.RelativeUncertainty, b.RelativeUncertainty);
-            Number result = new(value)
+            Number result = new(value, sigfigs: int.MaxValue, decimals: int.MaxValue)
             {
                 RelativeUncertainty = uncertainty
             };
@@ -352,7 +371,7 @@ public class Calculator : MonoBehaviour
             minDecimals = Math.Min(minDecimals, Math.Min(a.Decimals, b.Decimals));
             double value = a.Value / b.Value;
             double uncertainty = AddUncertainty(a.RelativeUncertainty, b.RelativeUncertainty);
-            Number result = new(value)
+            Number result = new(value, sigfigs: int.MaxValue, decimals: int.MaxValue)
             {
                 RelativeUncertainty = uncertainty
             };
@@ -366,7 +385,7 @@ public class Calculator : MonoBehaviour
             minDecimals = Math.Min(minDecimals, a.Decimals);
             double value = Math.Pow(a.Value, b.Value);
             double uncertainty = MathUtils.ExponentUncertainty(a, b);
-            Number result = new(value)
+            Number result = new(value, sigfigs: int.MaxValue, decimals: int.MaxValue)
             {
                 RelativeUncertainty = uncertainty
             };
@@ -380,7 +399,7 @@ public class Calculator : MonoBehaviour
             minDecimals = Math.Min(minDecimals, arg.Decimals);
             double value = Math.Log(arg.Value, baseNum.value);
             double uncertainty = MathUtils.LogUncertainty(baseNum.Value, arg);
-            return new(value, uncertainty: uncertainty);
+            return new(value, sigfigs: int.MaxValue, decimals: int.MaxValue, uncertainty: uncertainty);
         }
 
         static double AddUncertainty(double a, double b)
@@ -401,16 +420,17 @@ public class Calculator : MonoBehaviour
             sigfigs = SigFigCount(valueString);
             Decimals = DecimalCount(valueString);
             ScientificNotation = new(string.Empty);
-            UpdateScientificNotation();
+            if (SigFigs != int.MaxValue) UpdateScientificNotation();
         }
 
-        public Number(double value, int? sigfigs = null, double uncertainty = 0) : base("")
+        public Number(double value, int? sigfigs = null, int? decimals = null, double uncertainty = 0)
         {
             this.value = value;
             this.sigfigs = sigfigs ?? SigFigCount(value.ToString());
+            Decimals = decimals ?? DecimalCount(value.ToString());
             Uncertainty = uncertainty;
             ScientificNotation = new(string.Empty);
-            UpdateScientificNotation();
+            if (SigFigs != int.MaxValue) UpdateScientificNotation();
         }
 
         public string ToScientificString()

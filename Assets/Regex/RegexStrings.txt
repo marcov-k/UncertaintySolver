@@ -13,6 +13,9 @@ Log Parsing:
 Parentheses Multiplication Fixing:
 (?:(?<=[0-9.\)\]])\()|(?:(?<=\))[0-9.])
 
+Parentheses Negative Fixing:
+(?:(?<=(?<![0-9\)\]])-)\()
+
 Log Multiplication Fixing:
 (?:(?<=[0-9.\)\]])l)
 
