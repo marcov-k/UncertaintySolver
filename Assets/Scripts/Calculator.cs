@@ -53,8 +53,8 @@ public class Calculator : MonoBehaviour
 
     void Test()
     {
-        string testInput = "(1.000/2.000)*(10.00^(-(14.00-12.24[0.01])))";
-        double answer = (1 / 2) * Math.Pow(10, -(14 - 12.24));
+        string testInput = "-7.82-5.97-6.16";
+        double answer = -7.82 - 5.97 - 6.16;
         string result = Calculate(testInput);
         Debug.Log($"Test Input: {testInput}, Result: {result}, Correct Answer: {answer}");
     }
@@ -281,6 +281,7 @@ public class Calculator : MonoBehaviour
                         break;
                 }
 
+                operations.Reverse();
                 foreach (var op in operations)
                 {
                     if (opChecks.Contains(op.Op))
@@ -304,7 +305,7 @@ public class Calculator : MonoBehaviour
             set
             {
                 this.value = value;
-                UpdateScientificNotation();
+                if (sigfigs != int.MaxValue) UpdateScientificNotation();
             }
         }
         double value;
